@@ -1,8 +1,7 @@
 import { Request } from '@types';
-import { Validate } from '@validators';
 import http from 'http';
 import { URL } from 'url';
-import { Controller, POST } from './controllers';
+import { Body, Controller, POST } from './controllers';
 
 import { IsString } from 'class-validator';
 
@@ -16,12 +15,13 @@ const auth = (req: Request) => {
 };
 
 @Controller('base')
-@Validate('body', DTO)
+// @Validate('body', DTO)
 export class Controllera {
   // @Validate('body', DTO)
   @POST('/:nane', [auth])
-  async test(req: any) {
-    console.log(req);
+  async test(@Body() body: any) {
+    console.log('==============', body);
+    return body;
   }
 }
 
@@ -54,11 +54,15 @@ const server = http.createServer(async (req, res) => {
       headers: req.headers,
     });
 
-    res.statusCode = response.statusCode ?? 200;
+    console.log(response);
+
+    res.statusCode = response.status ?? 200;
     res.setHeader('Content-Type', 'application/json');
-    res.end(JSON.stringify(response.data ? response.data : { ...response }));
+
+    const resp = JSON.stringify(response.data ? response.data : { ...response });
+    res.end(resp);
   } catch (error: any) {
-    res.statusCode = error.statusCode ?? 500;
+    res.statusCode = error.status ?? 500;
     res.setHeader('Content-Type', 'application/json');
     res.end(JSON.stringify({ error: error.message ?? 'Internal Server Error' }));
   }

@@ -40,7 +40,7 @@ function wrapMethod(descriptor: PropertyDescriptor, param: any, dtoClass: any) {
     const errors = await validate(instance, { whitelist: true });
 
     if (errors.length) {
-      throw { statusCode: 422, message: 'Validation failed', data: errors };
+      throw { status: 422, message: 'Validation failed', data: errors };
     }
 
     return originalMethod.apply(this, args);

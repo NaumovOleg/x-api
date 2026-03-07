@@ -45,7 +45,7 @@ export const ParseBody = (request: Request<any, any, any>) => {
 
   if (!body || !boundaryMatch) {
     return {
-      statusCode: 400,
+      status: 400,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message: 'Invalid multipart request' }),
     };

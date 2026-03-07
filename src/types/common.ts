@@ -12,10 +12,10 @@ export type Request<B = unknown, Q extends P_Q = unknown, P extends P_Q = unknow
   body: B;
   isBase64Encoded?: boolean;
 };
-export type Router = (req: Request) => Promise<{ statusCode: number; data: any; message?: string }>;
+export type Router = (req: Request) => Promise<{ status: number; data: any; message?: string }>;
 
 export type EndpointResponse<T = any> = {
-  statusCode: number;
+  status: number;
   data?: T;
   error?: any;
 };

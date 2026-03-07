@@ -1,8 +1,8 @@
 // Внутри класса, который возвращает @Controller
-import { ParamMetadata } from '@types';
+import { ControllerInstance, Middleware, ParamMetadata } from '@types';
 import { transformAndValidate } from './transform';
 
-import { ControllerInstance } from '@types';
+import { PARAM_METADATA_KEY } from '@constants';
 
 export const executeControllerMethod = async (
   controller: ControllerInstance,
@@ -15,11 +15,24 @@ export const executeControllerMethod = async (
   const endpointMeta = Reflect.getMetadata('endpoint', controller, propertyName);
   if (!endpointMeta) return null;
 
+  const methodMiddlewares: Middleware[] =
+    Reflect.getMetadata('middlewares', controller, propertyName) || [];
+
+  let processedPayload = { ...payload };
+  for (let i = 0; i < methodMiddlewares.length; i++) {
+    const middleware = methodMiddlewares[i];
+    const result = await middleware(processedPayload);
+    if (result) {
+      processedPayload = { ...processedPayload, ...result };
+    }
+  }
+
+  const prototype = Object.getPrototypeOf(controller);
   const paramMetadata: ParamMetadata[] =
-    Reflect.getMetadata('design:paramtypes', controller, propertyName) || [];
+    Reflect.getMetadata(PARAM_METADATA_KEY, prototype, propertyName) || [];
 
   if (paramMetadata.length === 0) {
-    return fn.call(controller, payload);
+    return fn.call(controller, processedPayload);
   }
 
   const args: any[] = [];
@@ -29,27 +42,24 @@ export const executeControllerMethod = async (
 
     switch (param.type) {
       case 'body':
-        value = await transformAndValidate(param.dto, payload.body);
+        value = await transformAndValidate(param.dto, processedPayload.body);
         break;
-
       case 'params':
-        value = param.name ? payload.params?.[param.name] : payload.params;
+        value = param.name ? processedPayload.params?.[param.name] : processedPayload.params;
         break;
-
       case 'query':
-        value = param.name ? payload.query?.[param.name] : payload.query;
+        value = param.name ? processedPayload.query?.[param.name] : processedPayload.query;
         break;
-
       case 'request':
-        value = payload;
+        value = processedPayload;
         break;
 
       case 'headers':
-        value = param.name ? payload.headers?.[param.name] : payload.headers;
+        value = param.name ? processedPayload.headers?.[param.name] : processedPayload.headers;
         break;
 
       case 'cookies':
-        value = param.name ? payload.cookies?.[param.name] : payload.cookies;
+        value = param.name ? processedPayload.cookies?.[param.name] : processedPayload.cookies;
         break;
     }
 
@@ -57,4 +67,39 @@ export const executeControllerMethod = async (
   }
 
   return fn.apply(controller, args);
+};
+
+export const getControllerMethods = (controller: ControllerInstance) => {
+  const methods: Array<{
+    name: string;
+    httpMethod: string;
+    pattern: string;
+    middlewares?: Array<(Request: any) => any>;
+  }> = [];
+
+  let proto = Object.getPrototypeOf(controller);
+
+  while (proto && proto !== Object.prototype) {
+    const propertyNames = Object.getOwnPropertyNames(proto);
+    for (const propertyName of propertyNames) {
+      if (propertyName === 'constructor') continue;
+
+      const endpointMeta = Reflect.getMetadata('endpoint', proto, propertyName);
+
+      if (endpointMeta) {
+        const [httpMethod, pattern] = endpointMeta;
+        const methodMiddlewares = Reflect.getMetadata('middlewares', proto, propertyName);
+
+        methods.push({
+          name: propertyName,
+          httpMethod,
+          pattern,
+          middlewares: methodMiddlewares,
+        });
+      }
+    }
+    proto = Object.getPrototypeOf(proto);
+  }
+
+  return methods;
 };

@@ -18,12 +18,10 @@ export function Validate(param: ToValidate, dtoClass: any) {
           });
           if (itemErrors.length > 0) errors.push(itemErrors);
         }
-        if (errors.length > 0)
-          throw { statusCode: 422, message: 'Validation failed', data: errors };
+        if (errors.length > 0) throw { status: 422, message: 'Validation failed', data: errors };
       } else {
         const errors = await validate(new dtoClass(value), { whitelist: true });
-        if (errors.length > 0)
-          throw { statusCode: 422, message: 'Validation failed', data: errors };
+        if (errors.length > 0) throw { status: 422, message: 'Validation failed', data: errors };
       }
 
       return originalMethod.apply(this, args);

@@ -1,1 +1,1 @@
-export * from './arguments';
+export * from './extractors';

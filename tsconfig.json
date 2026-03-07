@@ -30,6 +30,9 @@
       ],
       "@validators": [
         "./src/validators/index.ts"
+      ],
+      "@constants": [
+        "./src/constants.ts"
       ]
     }
   }

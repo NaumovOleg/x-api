@@ -1,7 +1,13 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import 'reflect-metadata';
 
-import { executeControllerMethod, matchRoute, ParseBody, Query } from '@utils';
+import {
+  executeControllerMethod,
+  getControllerMethods,
+  matchRoute,
+  ParseBody,
+  Query,
+} from '@utils';
 
 type ControllerClass = { new (...args: any[]): any };
 type ControllerInstance = InstanceType<ControllerClass>;
@@ -46,7 +52,7 @@ export function Controller(
             return await original.apply(this, args);
           } catch (err: any) {
             return {
-              statusCode: err.statusCode ?? 400,
+              status: err.status ?? 400,
               message: err.message,
               data: err,
             };
@@ -57,44 +63,11 @@ export function Controller(
 
     return class extends constructor {
       executeControllerMethod = executeControllerMethod;
+      getControllerMethods = getControllerMethods;
       constructor(...args: any[]) {
         super(...args);
       }
 
-      getControllerMethods(controller: ControllerInstance) {
-        const methods: Array<{
-          name: string;
-          httpMethod: string;
-          pattern: string;
-          middlewares?: Array<(Request: any) => any>;
-        }> = [];
-
-        let proto = Object.getPrototypeOf(controller);
-
-        while (proto && proto !== Object.prototype) {
-          const propertyNames = Object.getOwnPropertyNames(proto);
-          for (const propertyName of propertyNames) {
-            if (propertyName === 'constructor') continue;
-
-            const endpointMeta = Reflect.getMetadata('endpoint', proto, propertyName);
-
-            if (endpointMeta) {
-              const [httpMethod, pattern] = endpointMeta;
-              const methodMiddlewares = Reflect.getMetadata('middlewares', proto, propertyName);
-
-              methods.push({
-                name: propertyName,
-                httpMethod,
-                pattern,
-                middlewares: methodMiddlewares,
-              });
-            }
-          }
-          proto = Object.getPrototypeOf(proto);
-        }
-
-        return methods;
-      }
       handleRequest = async (request: any) => {
         const method = request.method;
         const path = (request.url.path ?? request.url.pathname ?? '').replace(/^\/+/, '');
@@ -106,7 +79,7 @@ export function Controller(
           request.body = ParseBody(request);
           request.query = Query(request.url);
         } catch (err) {
-          throw { statusCode: 500, message: 'Validation failed', data: err };
+          throw { status: 500, message: 'Validation failed', data: err };
         }
 
         const routePrefix: string = Reflect.getMetadata('routePrefix', proto) || '';
@@ -180,13 +153,13 @@ export function Controller(
                   payload = { ...payload, middlewareResponse };
                 }
 
-                return fn.call(this, payload);
+                return this.executeControllerMethod(this, propertyName, payload);
               }
             }
           }
         }
 
-        return { statusCode: 404, message: 'Method Not Found' };
+        return { status: 404, message: 'Method Not Found' };
       };
     };
   };
