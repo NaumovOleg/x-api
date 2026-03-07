@@ -1,58 +1,32 @@
-import { SERVER_CONFIG_KEY, SERVER_MODULES_KEY, STOPPED } from '@constants';
-import { ParseBody, ParseQuery } from '@utils';
-import http from 'http';
-import url from 'url';
+import { STOPPED } from '@constants';
+import { ServerConfig } from '@types';
+import { collectRawBody, ParseBody, ParseCookies, ParseQuery, resolveConfig } from '@utils';
+import http, { ServerResponse } from 'http';
+import { Socket } from './Socket';
+import { WebSocketService } from './websocket/WebsocetService';
+import { WebSocketServer } from './websocket/WebsocketServer';
 
-interface ServerConfig {
-  port?: number;
-  host?: string;
-  globalMiddlewares?: any[];
-  globalInterceptors?: any[];
-  globalErrorHandler?: any;
-  controllers?: any[];
-}
-
-export class Application {
+export class HttpServer extends Socket {
   private app: http.Server;
   private config: ServerConfig;
   private isRunning: boolean = false;
 
   constructor(configOrClass?: any) {
-    this.config = this.resolveConfig(configOrClass);
-    this.app = http.createServer(this.requestHandler.bind(this));
+    super();
+    this.config = resolveConfig(configOrClass);
+
+    const app = http.createServer(this.requestHandler.bind(this));
+
+    if (this.config.websocket?.enabled) {
+      this.wss = new WebSocketServer(app, {
+        path: this.config.websocket.path || '/',
+      });
+      WebSocketService.getInstance().initialize(this.wss);
+    }
+
+    this.app = app;
 
     this.logConfig();
-  }
-
-  private resolveConfig(configOrClass?: any): ServerConfig {
-    let config: ServerConfig = {};
-
-    if (configOrClass && typeof configOrClass === 'function') {
-      const decoratorConfig = Reflect.getMetadata(SERVER_CONFIG_KEY, configOrClass) || {};
-      const controllers = Reflect.getMetadata(SERVER_MODULES_KEY, configOrClass) || [];
-
-      config = {
-        port: 3000,
-        host: 'localhost',
-        ...decoratorConfig,
-        controllers: [...controllers, ...(decoratorConfig.controllers || [])],
-      };
-    } else if (configOrClass && typeof configOrClass === 'object') {
-      config = { port: 3000, host: 'localhost', ...configOrClass };
-    }
-    // Если ничего не передано
-    else {
-      config = {
-        port: 3000,
-        host: 'localhost',
-        globalMiddlewares: [],
-        globalInterceptors: [],
-        controllers: [],
-      };
-      console.log('⚙️ Using default configuration');
-    }
-
-    return config;
   }
 
   private logConfig() {
@@ -62,6 +36,7 @@ export class Application {
 ╠════════════════════════════════════════╣
 ║  📍 Host: ${this.config.host}                       ║
 ║  🔌 Port: ${this.config.port}                         ║
+║  🔌 Websocket: ${!!this.config.websocket}                         ║
 ║  🔧 Middlewares: ${this.config.globalMiddlewares?.length || 0}                   ║
 ║  🎯 Interceptors: ${this.config.globalInterceptors?.length || 0}                   ║
 ║  📦 Controllers: ${this.config.controllers?.length || 0}                   ║
@@ -132,14 +107,12 @@ export class Application {
     const startTime = Date.now();
 
     try {
-      const parsedUrl = url.parse(req.url || '/', true);
-      const request = await this.createRequest(req, parsedUrl);
+      const request = await this.createRequest(req);
 
-      let processedRequest = await this.applyMiddlewares(request);
-      const response = await this.findController(processedRequest);
+      let processedRequest = await this.applyMiddlewares(request, res);
+      const data = await this.findController(processedRequest, res);
 
-      console.log(response);
-      const finalResponse = await this.applyInterceptors(response, processedRequest);
+      const finalResponse = await this.applyInterceptors(data, res);
 
       await this.sendResponse(res, finalResponse, startTime);
     } catch (error) {
@@ -147,11 +120,8 @@ export class Application {
     }
   }
 
-  private async createRequest(
-    req: http.IncomingMessage,
-    parsedUrl: url.UrlWithParsedQuery,
-  ): Promise<any> {
-    const rawBody = await this.collectRawBody(req);
+  private async createRequest(req: http.IncomingMessage): Promise<any> {
+    const rawBody = await collectRawBody(req);
 
     const parseRequest = {
       body: rawBody,
@@ -165,8 +135,6 @@ export class Application {
     const host = req.headers.host || 'localhost';
     const fullUrl = `${protocol}://${host}${req.url}`;
 
-    console.log('🔧 Creating request with URL:', fullUrl);
-
     const whatwgUrl = new URL(fullUrl);
 
     return {
@@ -178,52 +146,17 @@ export class Application {
       rawBody: rawBody,
       query: ParseQuery(whatwgUrl),
       params: {},
-      cookies: this.parseCookies(req),
+      cookies: ParseCookies(req),
       isBase64Encoded: false,
       _startTime: Date.now(),
     };
   }
 
-  private collectRawBody(req: http.IncomingMessage): Promise<Buffer> {
-    return new Promise((resolve) => {
-      const chunks: Buffer[] = [];
-
-      req.on('data', (chunk) => {
-        chunks.push(Buffer.from(chunk));
-      });
-
-      req.on('end', () => {
-        const buffer = Buffer.concat(chunks);
-        resolve(buffer);
-      });
-
-      req.on('error', () => {
-        resolve(Buffer.from(''));
-      });
-    });
-  }
-
-  private parseCookies(req: http.IncomingMessage): Record<string, string> {
-    const cookieHeader = req.headers.cookie;
-    if (!cookieHeader) return {};
-
-    return cookieHeader.split(';').reduce(
-      (cookies, cookie) => {
-        const [name, value] = cookie.trim().split('=');
-        if (name && value) {
-          cookies[name] = decodeURIComponent(value);
-        }
-        return cookies;
-      },
-      {} as Record<string, string>,
-    );
-  }
-
-  private async applyMiddlewares(request: any): Promise<any> {
+  private async applyMiddlewares(request: any, res: http.ServerResponse): Promise<any> {
     let processed = request;
 
     for (const middleware of this.config.globalMiddlewares || []) {
-      const result = await middleware(processed);
+      const result = await middleware(processed, res);
       if (result) {
         processed = { ...processed, ...result };
       }
@@ -232,14 +165,13 @@ export class Application {
     return processed;
   }
 
-  private async findController(request: any): Promise<any> {
+  private async findController(request: any, response?: ServerResponse): Promise<any> {
     for (const ControllerClass of this.config.controllers || []) {
       const instance = new ControllerClass();
-
       if (typeof instance.handleRequest === 'function') {
-        const response = await instance.handleRequest(request);
-        if (response && response.status !== 404) {
-          return response;
+        const data = await instance.handleRequest(request, response);
+        if (data && data.status !== 404) {
+          return data;
         }
       }
     }
@@ -250,8 +182,8 @@ export class Application {
     };
   }
 
-  private async applyInterceptors(response: any, request: any): Promise<any> {
-    let processed = response;
+  private async applyInterceptors(request: any, response: ServerResponse): Promise<any> {
+    let processed = request;
 
     for (const interceptor of this.config.globalInterceptors || []) {
       processed = await interceptor(processed, request);
@@ -262,16 +194,27 @@ export class Application {
 
   private async sendResponse(
     res: http.ServerResponse,
-    response: any,
+    data: any,
     startTime: number,
   ): Promise<void> {
-    const data = response?.data !== undefined ? response.data : response;
+    const resp = data?.data !== undefined ? data.data : data;
+    if (!res.headersSent) {
+      if (!res.getHeader('Content-Type')) {
+        res.setHeader('Content-Type', 'application/json');
+      }
 
-    res.setHeader('Content-Type', 'application/json');
+      if (data?.headers) {
+        Object.entries(data.headers).forEach(([key, value]) => {
+          if (!res.getHeader(key)) {
+            res.setHeader(key, value as string);
+          }
+        });
+      }
+    }
     res.setHeader('X-Response-Time', `${Date.now() - startTime}ms`);
+    res.statusCode = data.status ?? 200;
 
-    res.statusCode = response.status ?? 200;
-    res.end(JSON.stringify(data));
+    res.end(JSON.stringify(resp));
   }
 
   private async handleError(

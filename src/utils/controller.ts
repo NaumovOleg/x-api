@@ -1,8 +1,10 @@
 import { ControllerInstance, Middleware, ParamMetadata } from '@types';
 import { MultipartProcessor } from '@utils';
+import { WebSocketService } from '../app/http/websocket/WebsocetService';
 import { transformAndValidate } from './transform';
 
-import { ENDPOINT, MIDDLEWARES, PARAM_METADATA_KEY } from '@constants';
+import { ENDPOINT, MIDDLEWARES, PARAM_METADATA_KEY, WS_SERVICE_KEY } from '@constants';
+import { ServerResponse } from 'http';
 
 const getBodyAndMultipart = (payload: any) => {
   let body = payload.body;
@@ -29,6 +31,7 @@ export const executeControllerMethod = async (
   controller: ControllerInstance,
   propertyName: string,
   payload: any,
+  response?: ServerResponse,
 ) => {
   const fn = controller[propertyName];
   if (typeof fn !== 'function') return null;
@@ -57,34 +60,52 @@ export const executeControllerMethod = async (
 
   const args: any[] = [];
 
-  for (const param of paramMetadata) {
-    let value: any;
+  const wsParams = Reflect.getMetadata(WS_SERVICE_KEY, controller, propertyName) || [];
+  const totalParams = Math.max(
+    paramMetadata.length ? Math.max(...paramMetadata.map((p) => p.index)) + 1 : 0,
+    wsParams.length ? Math.max(...wsParams.map((p: any) => p.index)) + 1 : 0,
+  );
 
-    switch (param.type) {
-      case 'body':
-        value = await transformAndValidate(param.dto, body);
-        break;
-      case 'multipart':
-        value = multipart;
-        break;
-      case 'params':
-        value = param.name ? payload.params?.[param.name] : payload.params;
-        break;
-      case 'query':
-        value = param.name ? payload.query?.[param.name] : payload.query;
-        break;
-      case 'request':
-        value = payload;
-        break;
-      case 'headers':
-        value = param.name ? payload.headers?.[param.name] : payload.headers;
-        break;
-      case 'cookies':
-        value = param.name ? payload.cookies?.[param.name] : payload.cookies;
-        break;
+  for (let i = 0; i < totalParams; i++) {
+    const wsParam = wsParams.find((p: any) => p.index === i);
+    if (wsParam) {
+      args[i] = WebSocketService.getInstance();
+      continue;
     }
 
-    args.push(value);
+    const param = paramMetadata.find((p) => p.index === i);
+    if (param) {
+      let value: any;
+
+      switch (param.type) {
+        case 'body':
+          value = await transformAndValidate(param.dto, body);
+          break;
+        case 'query':
+          value = param.name ? payload.query?.[param.name] : payload.query;
+          break;
+        case 'params':
+          value = param.name ? payload.params?.[param.name] : payload.params;
+          break;
+        case 'headers':
+          value = param.name ? payload.headers?.[param.name] : payload.headers;
+          break;
+        case 'cookies':
+          value = param.name ? payload.cookies?.[param.name] : payload.cookies;
+          break;
+        case 'request':
+          value = payload;
+          break;
+        case 'response':
+          value = response;
+          break;
+        default:
+          value = undefined;
+      }
+      args[i] = value;
+    } else {
+      args[i] = undefined;
+    }
   }
 
   return fn.apply(controller, args);
@@ -95,7 +116,7 @@ export const getControllerMethods = (controller: ControllerInstance) => {
     name: string;
     httpMethod: string;
     pattern: string;
-    middlewares?: Array<(Request: any) => any>;
+    middlewares?: Array<(req: any, res?: ServerResponse) => any>;
   }> = [];
 
   let proto = Object.getPrototypeOf(controller);

@@ -1,3 +1,4 @@
+import http from 'http';
 export const ParseQuery = (url: URL) => {
   const params = url.searchParams;
   const query: Record<string, string | string[]> = {};
@@ -66,4 +67,20 @@ export const ParseBody = (request: any): any => {
   }
 
   return body;
+};
+
+export const ParseCookies = (req: http.IncomingMessage): Record<string, string> => {
+  const cookieHeader = req.headers.cookie;
+  if (!cookieHeader) return {};
+
+  return cookieHeader.split(';').reduce(
+    (cookies, cookie) => {
+      const [name, value] = cookie.trim().split('=');
+      if (name && value) {
+        cookies[name] = decodeURIComponent(value);
+      }
+      return cookies;
+    },
+    {} as Record<string, string>,
+  );
 };

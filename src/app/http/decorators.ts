@@ -1,16 +1,6 @@
-// decorators/ServerConfig.ts
-import 'reflect-metadata';
-
 import { SERVER_CONFIG_KEY, SERVER_MODULES_KEY } from '@constants';
 
-export interface ServerConfig {
-  port?: number;
-  host?: string;
-  globalMiddlewares?: any[];
-  globalInterceptors?: any[];
-  globalErrorHandler?: any;
-  controllers?: any[];
-}
+import { ServerConfig } from '@types';
 
 export function Server(config: ServerConfig = {}) {
   return function (target: any) {

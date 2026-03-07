@@ -1,6 +1,4 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import 'reflect-metadata';
-
 import {
   CONTROLLERS,
   ENDPOINT,
@@ -12,6 +10,8 @@ import {
 } from '@constants';
 import { Middleware } from '@types';
 import { executeControllerMethod, getControllerMethods, matchRoute } from '@utils';
+import { ServerResponse } from 'http';
+import 'reflect-metadata';
 
 type ControllerClass = { new (...args: any[]): any };
 type ControllerInstance = InstanceType<ControllerClass>;
@@ -26,7 +26,7 @@ interface ControllerConfig {
 
 export function Controller(
   config: string | ControllerConfig,
-  middlewares: Array<(Request: Request) => any> = [],
+  middlewares: Array<(request: Request, resp?: ServerResponse) => any> = [],
 ) {
   // Handle both string and config object
   const routePrefix = typeof config === 'string' ? config : config.prefix;
@@ -88,12 +88,14 @@ export function Controller(
         name: string;
         payload: any;
         interceptors: Array<(...args: any[]) => any | Promise<any>>;
+        response?: ServerResponse;
       }) {
         try {
           let response = await this.executeControllerMethod(
             data.controllerInstance,
             data.name,
             data.payload,
+            data.response,
           );
 
           let status = response.status ?? 200;
@@ -128,7 +130,7 @@ export function Controller(
         }
       }
 
-      handleRequest = async (request: any) => {
+      handleRequest = async (request: any, response?: ServerResponse) => {
         const method = request.method;
         const path = (request.url.path ?? request.url.pathname ?? '').replace(/^\/+/, '');
 
@@ -136,7 +138,7 @@ export function Controller(
 
         for (let index = 0; index < baseInterceptors.request.length; index++) {
           const interceptor = interceptors.request[index];
-          request = await interceptor(request);
+          request = await interceptor(request, response);
         }
 
         const routePrefix: string = Reflect.getMetadata(ROUTE_PREFIX, proto) || '';
@@ -176,7 +178,7 @@ export function Controller(
                   ...controllerMiddlewares,
                   ...(methodInfo.middlewares || []),
                 ]) {
-                  const middlawareResponde = await middleware(payload);
+                  const middlawareResponde = await middleware(payload, response);
                   payload = { ...payload, ...middlawareResponde };
                 }
 
@@ -185,6 +187,7 @@ export function Controller(
                   controllerInstance,
                   name: methodInfo.name,
                   payload,
+                  response,
                 });
               }
             }
@@ -222,6 +225,7 @@ export function Controller(
                 controllerInstance: this,
                 name: propertyName,
                 payload,
+                response,
               });
             }
           }

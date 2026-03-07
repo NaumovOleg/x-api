@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { IncomingHttpHeaders } from 'http';
+import { IncomingHttpHeaders, ServerResponse } from 'http';
 
 type P_Q = Record<string, string | undefined> | null | unknown;
 
@@ -12,7 +12,10 @@ export type Request<B = unknown, Q extends P_Q = unknown, P extends P_Q = unknow
   body: B;
   isBase64Encoded?: boolean;
 };
-export type Router = (req: Request) => Promise<{ status: number; data: any; message?: string }>;
+export type Router = (
+  req: Request,
+  res?: ServerResponse,
+) => Promise<{ status: number; data: any; message?: string }>;
 
 export type EndpointResponse<T = any> = {
   status: number;
@@ -32,7 +35,7 @@ export interface IController {
   handleRequest: Router;
 }
 
-export type Middleware = (req: Request) => Promise<Request> | Request;
+export type Middleware = (req: Request, res?: ServerResponse) => Promise<Request> | Request;
 
 export type ParamDecoratorType =
   | 'body'
@@ -41,6 +44,7 @@ export type ParamDecoratorType =
   | 'request'
   | 'headers'
   | 'cookies'
+  | 'response'
   | 'multipart';
 export interface ParamMetadata {
   index: number;
